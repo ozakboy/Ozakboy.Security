@@ -20,11 +20,15 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
+  <!--
+    刻意不引用 Microsoft.SourceLink.GitHub 套件,與其他 Ozakboy.* 套件一致。
+    自 .NET 8 起 SourceLink 已內建於 SDK,設定 PublishRepositoryUrl 與 EmbedUntrackedSources
+    (見 Directory.Build.props)即可 —— 已實測確認打包出的 nuspec 帶有
+    repository 元素(type / url / branch 齊備),與外掛套件的結果相同。
+    外掛套件反而多帶一條相依鏈,其中 10.0.300 版帶進的 Microsoft.Build.Tasks.Git 有安全通報,
+    在 TreatWarningsAsErrors 之下會讓「還原」階段就直接失敗。
+  -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.401">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
     <!-- DPAPI 在 .NET 上必須透過此官方套件取得(Microsoft 發佈,零第三方遞移相依) -->
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
   </ItemGroup>

@@ -2,16 +2,11 @@
 
   <PropertyGroup>
     <!--
-      IsTestProject 供 Directory.Build.props 的測試專案條件判斷用。
-      註:Directory.Build.props 會在專案本體之前被匯入,其中的 IsTestProject 條件實際上讀不到這裡設的值,
-      因此把測試專案該有的設定(不因警告中斷、不打包)在這裡一併明示,行為與 Directory.Build.props 的原意一致。
+      測試專案的降級設定(不因警告中斷、降低分析層級、不打包、CA1707 例外)
+      統一由 Directory.Build.props 提供:該檔已自行以專案名稱結尾推導 IsTestProject,
+      不再依賴測試 SDK 稍後才設定的值。這裡保留明示只是讓意圖直接可見。
     -->
     <IsTestProject>true</IsTestProject>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <IsPackable>false</IsPackable>
-    <!-- 測試方法慣用 方法_情境_預期 的底線命名,CA1707 對測試專案不適用 -->
-    <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
