@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Ozakboy.Security</PackageId>
+    <AssemblyName>Ozakboy.Security</AssemblyName>
+    <RootNamespace>Ozakboy.Security</RootNamespace>
+
+    <Title>Ozakboy.Security — 憑證與敏感資料保護</Title>
+    <Description>.NET 憑證與敏感資料保護工具:Windows DPAPI 金鑰保護(介面優先的 ISecretProtector,非 Windows 可替換實作,並提供不拋例外的 TryUnprotect)、日誌敏感字串遮罩(字串頭尾保留、URL query 參數、JSON 欄位,名稱比對忽略大小寫)、AES-GCM 設定檔加密(自帶版本標頭、每次產生新 nonce)與 PBKDF2 金鑰派生。除 DPAPI 所需的 Microsoft 官方 System.Security.Cryptography.ProtectedData 外,零第三方相依。Credential and sensitive-data protection for .NET: Windows DPAPI secret protection behind a substitutable interface, log masking for plain strings, URL query parameters and JSON fields, AES-GCM configuration encryption with a versioned envelope, and PBKDF2 key derivation. No third-party dependencies.</Description>
+    <PackageTags>ozakboy;security;dpapi;data-protection;secret;credential;api-key;masking;redaction;log-masking;aes-gcm;encryption;configuration;pbkdf2;key-derivation;dotnet;csharp</PackageTags>
+
+    <PackageProjectUrl>https://github.com/ozakboy/Ozakboy.Security</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ozakboy/Ozakboy.Security</RepositoryUrl>
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.401">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- DPAPI 在 .NET 上必須透過此官方套件取得(Microsoft 發佈,零第三方遞移相依) -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+  </ItemGroup>
+
+</Project>
