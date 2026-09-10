@@ -26,3 +26,13 @@ coverage*.xml
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# ── 機密(絕不進版控)──
+.claude/secrets.local.json
+**/secrets.local.json
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.key
