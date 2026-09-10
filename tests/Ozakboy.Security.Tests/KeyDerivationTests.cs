@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Ozakboy.Security.Configuration;
 
 namespace Ozakboy.Security.Tests;
@@ -77,7 +79,7 @@ public sealed class KeyDerivationTests
     public void DeriveKey_NullPassword_ThrowsArgumentNullException()
     {
         Assert.ThrowsExactly<ArgumentNullException>(
-            () => KeyDerivation.DeriveKey(null!, KeyDerivation.CreateSalt(), FastIterations));
+            () => KeyDerivation.DeriveKey((string)null!, KeyDerivation.CreateSalt(), FastIterations));
     }
 
     [TestMethod]
@@ -134,6 +136,68 @@ public sealed class KeyDerivationTests
     public void CreateKey_NonPositiveLength_ThrowsArgumentOutOfRangeException()
     {
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => KeyDerivation.CreateKey(0));
+    }
+
+    [TestMethod]
+    public void DeriveKey_ByteSpanPassword_MatchesTheStringOverload()
+    {
+        // 位元組多載存在的理由是密碼的生命週期可控,不是換一套派生規則;結果必須與字串多載完全一致。
+        byte[] salt = KeyDerivation.CreateSalt();
+        byte[] passwordBytes = Encoding.UTF8.GetBytes("correct horse battery staple");
+
+        byte[] fromBytes = KeyDerivation.DeriveKey(passwordBytes.AsSpan(), salt, FastIterations);
+        byte[] fromString = KeyDerivation.DeriveKey("correct horse battery staple", salt, FastIterations);
+
+        CollectionAssert.AreEqual(fromString, fromBytes);
+
+        // 用完立刻歸零,這正是字串多載做不到的事。
+        CryptographicOperations.ZeroMemory(passwordBytes);
+        Assert.IsTrue(passwordBytes.All(static b => b == 0), "密碼緩衝區必須可以被清零。");
+    }
+
+    [TestMethod]
+    public void DeriveKey_ByteSpanPassword_NonAsciiMatchesUtf8Encoding()
+    {
+        byte[] salt = KeyDerivation.CreateSalt();
+        const string password = "繁體中文通行碼";
+
+        byte[] fromBytes = KeyDerivation.DeriveKey(Encoding.UTF8.GetBytes(password), salt, FastIterations);
+        byte[] fromString = KeyDerivation.DeriveKey(password, salt, FastIterations);
+
+        CollectionAssert.AreEqual(fromString, fromBytes, "字串多載即是以 UTF-8 編碼後派生。");
+    }
+
+    [TestMethod]
+    public void DeriveKey_ByteSpanPassword_ValidatesSaltAndIterations()
+    {
+        byte[] password = Encoding.UTF8.GetBytes("password");
+
+        Assert.ThrowsExactly<ArgumentException>(
+            () => KeyDerivation.DeriveKey(password.AsSpan(), new byte[KeyDerivation.MinimumSaltLengthInBytes - 1], FastIterations));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            () => KeyDerivation.DeriveKey(password.AsSpan(), KeyDerivation.CreateSalt(), KeyDerivation.MinimumIterations - 1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            () => KeyDerivation.DeriveKey(password.AsSpan(), KeyDerivation.CreateSalt(), FastIterations, 0));
+    }
+
+    [TestMethod]
+    public void DeriveKey_ByteSpanPassword_ReturnsRequestedKeyLength()
+    {
+        byte[] salt = KeyDerivation.CreateSalt();
+        byte[] password = Encoding.UTF8.GetBytes("password");
+
+        Assert.HasCount(32, KeyDerivation.DeriveKey(password.AsSpan(), salt));
+        Assert.HasCount(16, KeyDerivation.DeriveKey(password.AsSpan(), salt, FastIterations, 16));
+    }
+
+    [TestMethod]
+    public void DeriveKey_SaltOf15Bytes_IsRejectedWhile16BytesIsAccepted()
+    {
+        // NIST SP 800-132 對 PBKDF2 鹽值的建議下限是 128 bits;15 位元組必須被擋下。
+        Assert.ThrowsExactly<ArgumentException>(
+            () => KeyDerivation.DeriveKey("password", new byte[15], FastIterations));
+        Assert.HasCount(32, KeyDerivation.DeriveKey("password", new byte[16], FastIterations));
+        Assert.HasCount(KeyDerivation.MinimumSaltLengthInBytes, KeyDerivation.CreateSalt());
     }
 
     [TestMethod]

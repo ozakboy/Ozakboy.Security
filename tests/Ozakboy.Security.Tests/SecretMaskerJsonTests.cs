@@ -17,7 +17,7 @@ public sealed class SecretMaskerJsonTests
 
         string masked = SecretMasker.Default.MaskJson(json);
 
-        Assert.AreEqual("""{"apiKey":"abcd****qrst","symbol":"BTCUSDT","quantity":1.5}""", masked);
+        Assert.AreEqual("""{"apiKey":"abc****rst","symbol":"BTCUSDT","quantity":1.5}""", masked);
     }
 
     [TestMethod]
@@ -27,7 +27,7 @@ public sealed class SecretMaskerJsonTests
 
         string masked = SecretMasker.Default.MaskJson(json);
 
-        Assert.AreEqual("""{"API_KEY":"abcd****qrst"}""", masked);
+        Assert.AreEqual("""{"API_KEY":"abc****rst"}""", masked);
     }
 
     [TestMethod]
@@ -37,7 +37,7 @@ public sealed class SecretMaskerJsonTests
 
         string masked = SecretMasker.Default.MaskJson(json);
 
-        Assert.AreEqual("""{"request":{"headers":{"signature":"0123****cdef"},"symbol":"ETHUSDT"}}""", masked);
+        Assert.AreEqual("""{"request":{"headers":{"signature":"012****ef"},"symbol":"ETHUSDT"}}""", masked);
     }
 
     [TestMethod]
@@ -57,7 +57,7 @@ public sealed class SecretMaskerJsonTests
 
         string masked = SecretMasker.Default.MaskJson(json);
 
-        Assert.AreEqual("""{"items":[{"secret":"abcd****qrst"},"plain",7]}""", masked);
+        Assert.AreEqual("""{"items":[{"secret":"abc****rst"},"plain",7]}""", masked);
     }
 
     [TestMethod]
@@ -67,7 +67,8 @@ public sealed class SecretMaskerJsonTests
 
         string masked = SecretMasker.Default.MaskJson(json);
 
-        Assert.AreEqual("""[{"password":"abcd****qrst"}]""", masked);
+        // password 屬於「一律全遮」欄位:人類密碼的熵值太低,露出頭尾等於交出去。
+        Assert.AreEqual("""[{"password":"****"}]""", masked);
     }
 
     [TestMethod]
@@ -77,7 +78,7 @@ public sealed class SecretMaskerJsonTests
 
         string masked = SecretMasker.Default.MaskJson(json);
 
-        Assert.AreEqual("""{"token":"1234****3456","refreshToken":"****"}""", masked);
+        Assert.AreEqual("""{"token":"123****56","refreshToken":"****"}""", masked);
     }
 
     [TestMethod]
@@ -114,7 +115,7 @@ public sealed class SecretMaskerJsonTests
         bool masked = SecretMasker.Default.TryMaskJson("""{"pwd":"abcdefghijklmnopqrst"}""", out string? result);
 
         Assert.IsTrue(masked);
-        Assert.AreEqual("""{"pwd":"abcd****qrst"}""", result);
+        Assert.AreEqual("""{"pwd":"****"}""", result, "pwd 是密碼類欄位,必須全遮。");
     }
 
     [TestMethod]
@@ -139,6 +140,6 @@ public sealed class SecretMaskerJsonTests
 
         string masked = masker.MaskJson("""{"listenKey":"abcdefghijklmnopqrst"}""");
 
-        Assert.AreEqual("""{"listenKey":"abcd****qrst"}""", masked);
+        Assert.AreEqual("""{"listenKey":"abc****rst"}""", masked);
     }
 }

@@ -13,13 +13,26 @@ namespace Ozakboy.Security.Configuration;
 /// quietly returning something wrong.
 /// </summary>
 /// <remarks>
+/// <para>
 /// 輸出格式為 <c>OZCF</c> 標頭(4 位元組)+ 版本(1 位元組)+ nonce(12 位元組)+ 驗證標籤(16 位元組)+ 密文。
-/// 標頭同時作為 AES-GCM 的關聯資料(associated data),因此標頭被竄改一樣會導致解密失敗。
-/// 每次加密都會產生新的 nonce —— 同一把金鑰重複使用同一個 nonce 會直接摧毀 GCM 的安全性。
+/// 標頭同時作為 AES-GCM 的關聯資料(associated data),因此標頭與密文的綁定關係也受驗證保護。
+/// 目前格式版本只有 1,魔術字或版本被改會先被格式檢查擋下,關聯資料是為日後格式演進(多版本並存)預留的。
 /// The layout is an <c>OZCF</c> magic header (4 bytes), a format version (1 byte), the nonce
-/// (12 bytes), the authentication tag (16 bytes) and the ciphertext. The header is also fed to
-/// AES-GCM as associated data, so tampering with it fails decryption too. A fresh nonce is generated
-/// for every encryption: reusing a nonce under the same key destroys GCM's security outright.
+/// (12 bytes), the authentication tag (16 bytes) and the ciphertext. The header is also fed to AES-GCM
+/// as associated data, so the binding between header and ciphertext is authenticated as well. With only
+/// format version 1 in existence, a tampered magic or version is caught by the format check first; the
+/// associated data is what keeps that binding sound once more than one version is in circulation.
+/// </para>
+/// <para>
+/// 每次加密都會產生新的 nonce —— 同一把金鑰重複使用同一個 nonce 會直接摧毀 GCM 的安全性。
+/// nonce 是 96 bits 的隨機值,依生日界限,同一把金鑰的加密次數建議不超過 2^32 次(約 43 億);
+/// 超過之後 nonce 碰撞的機率開始不可忽略,屆時應該輪替金鑰。設定檔加密的實際使用量離這個量級很遠。
+/// A fresh nonce is generated for every encryption: reusing a nonce under the same key destroys GCM's
+/// security outright. The nonce is 96 random bits, so by the birthday bound a single key should not
+/// encrypt more than 2^32 times (about 4.3 billion); past that, the chance of a nonce collision stops
+/// being negligible and the key should be rotated. Configuration encryption sits nowhere near that
+/// volume in practice.
+/// </para>
 /// </remarks>
 public static class ConfigurationProtector
 {
@@ -28,6 +41,19 @@ public static class ConfigurationProtector
     /// The current envelope format version.
     /// </summary>
     public const byte FormatVersion = 1;
+
+    /// <summary>
+    /// 目前平台是否支援 AES-GCM。硬體與作業系統的密碼學提供者未支援時為 <see langword="false"/>,
+    /// 此時 <see cref="Encrypt(string, ReadOnlySpan{byte})"/> 與 <see cref="Decrypt(string, ReadOnlySpan{byte})"/>
+    /// 會拋出 <see cref="PlatformNotSupportedException"/>。啟動時檢查一次,比在第一次寫設定檔時才炸掉好。
+    /// Whether AES-GCM is available on the current platform; <see langword="false"/> when the hardware or
+    /// the operating system's cryptographic provider does not offer it, in which case
+    /// <see cref="Encrypt(string, ReadOnlySpan{byte})"/> and
+    /// <see cref="Decrypt(string, ReadOnlySpan{byte})"/> throw
+    /// <see cref="PlatformNotSupportedException"/>. Checking this once at start-up beats discovering it
+    /// the first time a configuration file is written.
+    /// </summary>
+    public static bool IsSupported => AesGcm.IsSupported;
 
     /// <summary>
     /// AES-GCM 的 nonce 長度(位元組)。
@@ -267,6 +293,15 @@ public static class ConfigurationProtector
     /// <paramref name="protectedValue"/> 為 <see langword="null"/> 時拋出。
     /// Thrown when <paramref name="protectedValue"/> is <see langword="null"/>.
     /// </exception>
+    /// <remarks>
+    /// 平台不支援 AES-GCM 時同樣回傳 <see langword="false"/> 而不是讓
+    /// <see cref="PlatformNotSupportedException"/> 穿透 —— 名字叫 <c>Try</c> 的方法不該有例外從側面漏出來。
+    /// 想分辨「解不開」與「這台機器根本不支援」,請先看 <see cref="IsSupported"/>。
+    /// An unsupported platform also yields <see langword="false"/> rather than letting
+    /// <see cref="PlatformNotSupportedException"/> escape: a method named <c>Try</c> should not leak an
+    /// exception out the side. Check <see cref="IsSupported"/> first to tell "cannot decrypt" apart from
+    /// "this machine has no AES-GCM at all".
+    /// </remarks>
     /// <exception cref="ArgumentException">
     /// 金鑰長度不合法時拋出(金鑰長度是程式錯誤,不是資料問題,因此仍然拋出)。
     /// Thrown when the key length is invalid; a bad key length is a programming error rather than a
@@ -283,6 +318,11 @@ public static class ConfigurationProtector
             return true;
         }
         catch (SecretProtectionException)
+        {
+            plainText = null;
+            return false;
+        }
+        catch (PlatformNotSupportedException)
         {
             plainText = null;
             return false;

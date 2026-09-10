@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using Ozakboy.Security;
 using Ozakboy.Security.Configuration;
@@ -12,6 +13,15 @@ namespace Ozakboy.Security.Tests;
 [TestClass]
 public sealed class ConfigurationProtectorTests
 {
+    /// <summary>封裝標頭長度(魔術字 4 + 版本 1)。</summary>
+    private const int HeaderLength = 5;
+
+    /// <summary>nonce 長度。</summary>
+    private const int NonceLength = 12;
+
+    /// <summary>驗證標籤長度。</summary>
+    private const int TagLength = 16;
+
     private static byte[] CreateTestKey(byte seed = 1) => Enumerable.Range(0, 32).Select(i => (byte)(i + seed)).ToArray();
 
     [TestMethod]
@@ -84,16 +94,27 @@ public sealed class ConfigurationProtectorTests
     }
 
     [TestMethod]
-    public void Encrypt_CalledTwice_ProducesDifferentCipherTextBecauseNonceIsFresh()
+    public void Encrypt_CalledRepeatedly_UsesAFreshNonceEveryTime()
     {
+        // 只比對兩次不足以看出 nonce 是不是真的每次都重抽;GCM 一旦重複使用 nonce,同一把金鑰就等於破了。
+        const int rounds = 256;
         byte[] key = CreateTestKey();
+        var nonces = new HashSet<string>(StringComparer.Ordinal);
+        var cipherTexts = new HashSet<string>(StringComparer.Ordinal);
 
-        string first = ConfigurationProtector.Encrypt("same content", key);
-        string second = ConfigurationProtector.Encrypt("same content", key);
+        for (int i = 0; i < rounds; i++)
+        {
+            string encrypted = ConfigurationProtector.Encrypt("same content", key);
+            byte[] envelope = Convert.FromBase64String(encrypted);
 
-        Assert.AreNotEqual(first, second, "每次加密都必須使用新的 nonce,密文不得重複。");
-        Assert.AreEqual("same content", ConfigurationProtector.Decrypt(first, key));
-        Assert.AreEqual("same content", ConfigurationProtector.Decrypt(second, key));
+            nonces.Add(Convert.ToBase64String(envelope.AsSpan(HeaderLength, NonceLength)));
+            cipherTexts.Add(encrypted);
+
+            Assert.AreEqual("same content", ConfigurationProtector.Decrypt(encrypted, key));
+        }
+
+        Assert.HasCount(rounds, nonces, "每次加密都必須抽出不同的 nonce。");
+        Assert.HasCount(rounds, cipherTexts, "nonce 不同,密文就不該重複。");
     }
 
     [TestMethod]
@@ -137,7 +158,8 @@ public sealed class ConfigurationProtectorTests
         byte[] key = CreateTestKey();
         byte[] envelope = Convert.FromBase64String(ConfigurationProtector.Encrypt("payload", key));
 
-        // 標頭同時是 AES-GCM 的關聯資料,改動魔術字會被格式檢查擋下。
+        // 改動魔術字會在格式檢查階段就被擋下,AES-GCM 根本沒被呼叫到。
+        // 「標頭同時是關聯資料」這件事由 Decrypt_PayloadEncryptedWithDifferentAssociatedData_FailsAuthentication 驗證。
         envelope[0] = (byte)'X';
 
         var exception = Assert.ThrowsExactly<SecretProtectionException>(
@@ -229,6 +251,77 @@ public sealed class ConfigurationProtectorTests
     }
 
     [TestMethod]
+    public void Decrypt_PayloadEncryptedWithDifferentAssociatedData_FailsAuthentication()
+    {
+        // 標頭同時是 AES-GCM 的關聯資料 —— 這句宣稱要真的驗到,必須繞過格式檢查:
+        // 底下這份封裝的標頭是合法的 OZCF v1(過得了格式檢查),但加密當下餵進去的關聯資料是別的內容,
+        // 所以失敗一定來自 GCM 的驗證,而不是格式檢查。
+        byte[] key = CreateTestKey();
+        byte[] plainBytes = Encoding.UTF8.GetBytes("payload");
+        byte[] realHeader = [.. "OZCF"u8, ConfigurationProtector.FormatVersion];
+        byte[] otherAssociatedData = [.. "OZCF"u8, 0x02];
+
+        byte[] wrongAad = BuildEnvelope(key, plainBytes, realHeader, otherAssociatedData);
+        byte[] correctAad = BuildEnvelope(key, plainBytes, realHeader, realHeader);
+
+        // 對照組:除了關聯資料以外完全相同的封裝,解得開。
+        Assert.AreEqual("payload", ConfigurationProtector.Decrypt(Convert.ToBase64String(correctAad), key));
+
+        var exception = Assert.ThrowsExactly<SecretProtectionException>(
+            () => ConfigurationProtector.Decrypt(Convert.ToBase64String(wrongAad), key));
+
+        Assert.AreEqual(SecretProtectionFailureReason.DecryptionFailed, exception.Reason);
+    }
+
+    [TestMethod]
+    public void Decrypt_TamperedNonce_ThrowsWithDecryptionFailedReason()
+    {
+        byte[] key = CreateTestKey();
+        byte[] envelope = Convert.FromBase64String(ConfigurationProtector.Encrypt("payload", key));
+        envelope[HeaderLength] ^= 0xFF;
+
+        var exception = Assert.ThrowsExactly<SecretProtectionException>(
+            () => ConfigurationProtector.Decrypt(Convert.ToBase64String(envelope), key));
+
+        Assert.AreEqual(SecretProtectionFailureReason.DecryptionFailed, exception.Reason);
+    }
+
+    [TestMethod]
+    public void Decrypt_TamperedAuthenticationTag_ThrowsWithDecryptionFailedReason()
+    {
+        byte[] key = CreateTestKey();
+        byte[] envelope = Convert.FromBase64String(ConfigurationProtector.Encrypt("payload", key));
+        envelope[HeaderLength + NonceLength] ^= 0xFF;
+
+        var exception = Assert.ThrowsExactly<SecretProtectionException>(
+            () => ConfigurationProtector.Decrypt(Convert.ToBase64String(envelope), key));
+
+        Assert.AreEqual(SecretProtectionFailureReason.DecryptionFailed, exception.Reason);
+    }
+
+    [TestMethod]
+    public void Decrypt_TruncatedCipherText_ThrowsWithDecryptionFailedReason()
+    {
+        // 截掉尾巴的密文長度仍然合法(標頭齊全),所以格式檢查放行,擋下它的是 GCM 的驗證標籤。
+        byte[] key = CreateTestKey();
+        byte[] envelope = Convert.FromBase64String(ConfigurationProtector.Encrypt("payload-long-enough-to-truncate", key));
+        byte[] truncated = envelope[..^8];
+
+        Assert.IsTrue(truncated.Length > HeaderLength + NonceLength + TagLength, "截斷後仍須是格式上合法的封裝。");
+
+        var exception = Assert.ThrowsExactly<SecretProtectionException>(
+            () => ConfigurationProtector.Decrypt(Convert.ToBase64String(truncated), key));
+
+        Assert.AreEqual(SecretProtectionFailureReason.DecryptionFailed, exception.Reason);
+    }
+
+    [TestMethod]
+    public void IsSupported_ReportsWhetherAesGcmIsAvailable()
+    {
+        Assert.AreEqual(System.Security.Cryptography.AesGcm.IsSupported, ConfigurationProtector.IsSupported);
+    }
+
+    [TestMethod]
     public void IsProtectedValue_RecognisesOwnOutputOnly()
     {
         string encrypted = ConfigurationProtector.Encrypt("payload", CreateTestKey());
@@ -238,5 +331,31 @@ public sealed class ConfigurationProtectorTests
         Assert.IsFalse(ConfigurationProtector.IsProtectedValue(Convert.ToBase64String(new byte[] { 1, 2, 3, 4, 5, 6 })));
         Assert.IsFalse(ConfigurationProtector.IsProtectedValue(string.Empty));
         Assert.IsFalse(ConfigurationProtector.IsProtectedValue(null));
+    }
+
+    /// <summary>
+    /// 手工組出一份 OZCF 封裝,讓測試可以指定加密當下使用的關聯資料。
+    /// </summary>
+    /// <param name="key">對稱金鑰。</param>
+    /// <param name="plainBytes">明文。</param>
+    /// <param name="header">寫進封裝的標頭(決定格式檢查看到什麼)。</param>
+    /// <param name="associatedData">實際餵給 AES-GCM 的關聯資料。</param>
+    /// <returns>完整封裝。</returns>
+    private static byte[] BuildEnvelope(
+        byte[] key,
+        byte[] plainBytes,
+        byte[] header,
+        byte[] associatedData)
+    {
+        byte[] nonce = RandomNumberGenerator.GetBytes(NonceLength);
+        byte[] tag = new byte[TagLength];
+        byte[] cipherText = new byte[plainBytes.Length];
+
+        using (var aesGcm = new AesGcm(key, TagLength))
+        {
+            aesGcm.Encrypt(nonce, plainBytes, cipherText, tag, associatedData);
+        }
+
+        return [.. header, .. nonce, .. tag, .. cipherText];
     }
 }
