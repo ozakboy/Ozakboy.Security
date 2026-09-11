@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-11
+
+### Added
+
+- Package icon. The shared ozakboy brand mark now shows on nuget.org and in IDE package managers.
+
+No code changed in this release. NuGet package metadata cannot be altered on an already-published
+version, so refreshing the icon requires publishing a new one.
+
 ## [0.1.0] - 2026-09-11
 
 First release. Targets `net10.0` with no third-party dependencies.
@@ -76,5 +85,6 @@ First release. Targets `net10.0` with no third-party dependencies.
 - `SecretProtectionException` and `SecretProtectionFailureReason` — a single classified failure model shared by both
   protection paths.
 
-[Unreleased]: https://github.com/ozakboy/Ozakboy.Security/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ozakboy/Ozakboy.Security/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ozakboy/Ozakboy.Security/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ozakboy/Ozakboy.Security/releases/tag/v0.1.0
