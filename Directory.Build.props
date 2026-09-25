@@ -46,8 +46,10 @@
       CA1707:測試方法慣用 Method_Scenario_Expected 的底線命名,可讀性優於 PascalCase 長字串。
       MSTEST0037:建議改用 Assert.IsLessThanOrEqualTo 這類專用 API;但那些多載無法附帶自訂失敗訊息,
                   而測試失敗時的訊息比斷言方法的名稱更有價值,故不強制。
+      CA1848 / CA1873:建議改用 LoggerMessage 委派、避免在關閉的層級上求值參數;
+                  日誌遮罩的測試刻意呼叫消費端會用的 LogError("…{Key}", value) 這種擴充方法,那正是要驗證的路徑。
     -->
-    <NoWarn>$(NoWarn);CA1707;MSTEST0037</NoWarn>
+    <NoWarn>$(NoWarn);CA1707;MSTEST0037;CA1848;CA1873</NoWarn>
   </PropertyGroup>
 
   <!-- 套件中繼資料(共用部分) -->
