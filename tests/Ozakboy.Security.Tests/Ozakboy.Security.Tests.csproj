@@ -7,10 +7,36 @@
       不再依賴測試 SDK 稍後才設定的值。這裡保留明示只是讓意圖直接可見。
     -->
     <IsTestProject>true</IsTestProject>
+
+    <!--
+      改用 MSTest 內建的 Microsoft.Testing.Platform 執行器,不走舊的 VSTest。
+      理由是相依政策:VSTest 那條路徑會經由 Microsoft.TestPlatform.ObjectModel 遞移帶進
+      Newtonsoft.Json —— 它掛在 Microsoft 的套件底下,但本身是第三方社群套件,
+      而本專案的判定標準是遞移相依而非套件名稱。搭配 repo 根目錄的 global.json(test.runner),
+      .NET 10 的 dotnet test 才會走 MTP。
+      Uses MSTest's built-in Microsoft.Testing.Platform runner instead of the legacy VSTest path. This is a
+      dependency-policy decision: VSTest transitively drags in Newtonsoft.Json through
+      Microsoft.TestPlatform.ObjectModel, a third-party library sitting under a Microsoft package, and this
+      project judges by the transitive graph rather than by package name. The repo-level global.json
+      (test.runner) is what makes dotnet test on .NET 10 pick MTP up.
+    -->
+    <EnableMSTestRunner>true</EnableMSTestRunner>
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
+  <!--
+    刻意不參照 MSTest 整合套件,而是直接點名它底下需要的部分(理由同上:整合套件會帶進
+    Microsoft.NET.Test.Sdk,也就是 VSTest 那條路徑)。
+    覆蓋率由 Microsoft.Testing.Extensions.CodeCoverage 提供,trx 報告由 TrxReport 提供,兩者都不經過 VSTest。
+    Deliberately avoids the MSTest metapackage and names the pieces it needs instead (same reasoning: the
+    metapackage pulls in Microsoft.NET.Test.Sdk, which is the VSTest path). Coverage comes from
+    Microsoft.Testing.Extensions.CodeCoverage and trx reports from TrxReport, neither of which goes through VSTest.
+  -->
   <ItemGroup>
-    <PackageReference Include="MSTest" Version="4.0.2" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.0.2" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.0.2" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.1.0" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.0.2" />
   </ItemGroup>
 
   <ItemGroup>
