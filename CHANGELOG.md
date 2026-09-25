@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+建置期變更,消費者不受影響:套件內容與公開 API 均未改動。
+
+- **測試專案改走 Microsoft.Testing.Platform(MTP)**,不再經由 VSTest。原本引用 `MSTest` 整合套件會帶進
+  `Microsoft.NET.Test.Sdk`,而那條路徑會遞移帶進第三方的 Newtonsoft.Json,違反本專案「只允許 BCL 與 Microsoft
+  官方套件、判定看遞移相依而非套件名稱」的相依政策。現在改為直接點名 `MSTest.TestAdapter` / `MSTest.TestFramework`
+  並開啟 `EnableMSTestRunner`,trx 報告與覆蓋率分別由 `Microsoft.Testing.Extensions.TrxReport` /
+  `Microsoft.Testing.Extensions.CodeCoverage` 提供;repo 根目錄新增 `global.json`(`test.runner`),
+  .NET 10 的 `dotnet test` 才會走 MTP。`dotnet list package --include-transitive` 已確認不再出現 Newtonsoft.Json,
+  與 `Ozakboy.Http` 的測試專案寫法一致。
+- **CI 改用 MTP 的旗標**:`--logger "trx;…"` 改為 `--report-trx --report-trx-filename …`,trx 落在測試專案的
+  `bin/Release/net10.0/TestResults/` 底下。Windows 上「DPAPI 測試必須真的執行且通過」的驗證意圖不變:
+  仍以 `--filter "TestCategory=Windows"` 單獨跑一輪並讀 trx 的 `ResultSummary/Counters` 逐項核對;
+  差別只在 MTP 把 `Inconclusive` 計進 `notExecuted`,而該檢查本來就兩者一起看。
+- 核心 csproj 補上 `PackageReleaseNotes`(摘要 0.1.0 與 0.1.1),nuget.org 的套件頁面才看得到版本重點。
+
+Build-time changes only; consumers are unaffected: neither the package contents nor the public API changed.
+
+- **The test project now runs on Microsoft.Testing.Platform (MTP)** instead of VSTest. Referencing the `MSTest`
+  metapackage pulled in `Microsoft.NET.Test.Sdk`, and that path transitively drags in the third-party Newtonsoft.Json,
+  which violates this project's dependency policy (BCL and official Microsoft packages only, judged by the transitive
+  graph rather than by package name). The project now names `MSTest.TestAdapter` / `MSTest.TestFramework` directly
+  with `EnableMSTestRunner`, trx reports and coverage come from `Microsoft.Testing.Extensions.TrxReport` /
+  `Microsoft.Testing.Extensions.CodeCoverage`, and a repo-level `global.json` (`test.runner`) makes `dotnet test` on
+  .NET 10 pick MTP. `dotnet list package --include-transitive` confirms Newtonsoft.Json is gone, matching the
+  `Ozakboy.Http` test project.
+- **CI uses the MTP flags**: `--logger "trx;…"` became `--report-trx --report-trx-filename …`, with the trx written
+  under the test project's `bin/Release/net10.0/TestResults/`. The intent that DPAPI tests must actually run and pass
+  on Windows is unchanged: the category is still run on its own with `--filter "TestCategory=Windows"` and the trx
+  `ResultSummary/Counters` are still checked item by item; the only difference is that MTP counts `Inconclusive`
+  under `notExecuted`, and the check already looked at both.
+- The core csproj gains `PackageReleaseNotes` (summarising 0.1.0 and 0.1.1) so the nuget.org package page shows the
+  release highlights.
+
 ## [0.1.1] - 2026-09-11
 
 ### Added
