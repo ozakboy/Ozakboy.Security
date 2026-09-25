@@ -34,12 +34,21 @@ jobs:
       - name: Build
         run: dotnet build --configuration Release --no-restore
 
+      # 本 repo 的測試專案走 Microsoft.Testing.Platform 而非舊的 VSTest(見 tests 的 csproj:
+      # VSTest 那條路徑會遞移帶進第三方的 Newtonsoft.Json,違反本專案的相依政策)。
+      # MTP 不認得 VSTest 的 --logger,產生 trx 的等效寫法是 --report-trx;
+      # 報告落在測試專案的 bin/<Configuration>/<TFM>/TestResults/ 底下,不再是專案根目錄的 TestResults/。
       - name: Test
-        run: dotnet test --configuration Release --no-build --verbosity normal --logger "trx;LogFileName=test-results-${{ matrix.os }}.trx"
+        run: dotnet test --configuration Release --no-build --verbosity normal --report-trx --report-trx-filename test-results-${{ matrix.os }}.trx
 
       # 這一關是為了擋住「Windows 分類的測試被靜默略過而沒人發現」:
       # 單獨跑一輪這個分類,確認它真的執行了、通過數量大於 0、而且沒有任何一筆被跳過或未執行。
-      # 只看 dotnet test 的結束碼不夠 —— 一個測試都沒跑到也可能被算成「成功」。
+      # 只看 dotnet test 的結束碼不夠 —— MTP 在「一個測試都沒執行」時會以結束碼 8 收場,
+      # 但那只擋得住全部被略過的情況;部分略過(例如新增的 DPAPI 測試忘了在 Windows 上真的跑)
+      # 仍會以成功結束,所以還是得讀 trx 逐項核對。
+      # 篩選旗標:MSTest 4 的 MTP 執行器(經 VSTestBridge)沿用 --filter 與 VSTest 相同的運算式語法,
+      # 可直接接在 dotnet test 後面;trx 的 ResultSummary/Counters 結構與 VSTest 產出的一致,
+      # 差別只在 Inconclusive 會被計進 notExecuted(inconclusive 欄位維持 0),下面兩個一起看即可。
       - name: Windows-only tests must actually run
         if: runner.os == 'Windows'
         shell: pwsh
@@ -48,11 +57,12 @@ jobs:
 
           dotnet test --configuration Release --no-build `
             --filter "TestCategory=Windows" `
-            --logger "trx;LogFileName=windows-category.trx"
+            --report-trx --report-trx-filename windows-category.trx
           if ($LASTEXITCODE -ne 0) {
             throw "Windows 分類測試的執行結束碼為 $LASTEXITCODE。"
           }
 
+          # MTP 把 trx 寫在測試專案的 bin/Release/<TFM>/TestResults/ 底下,遞迴搜尋依檔名鎖定即可。
           $trx = Get-ChildItem -Path . -Recurse -Filter 'windows-category.trx' |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
