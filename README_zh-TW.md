@@ -1,16 +1,17 @@
 # Ozakboy.Security
 
-.NET 10 的憑證與敏感資料保護工具,只做三件事:
+.NET 10 的憑證與敏感資料保護工具,只做四件事:
 
-1. **DPAPI 金鑰保護** —— 用 Windows DPAPI 加密憑證,讓 API Key 這類東西不以明文落地,而且整個機制藏在介面後面,隨時可以換掉。
-2. **敏感字串遮罩** —— 寫進日誌前把憑證遮掉,支援純字串、URL query 參數、JSON 欄位,以及呼叫端根本沒機會交出值的自由文字。
-3. **設定檔加密** —— 用 AES-GCM 加密整份設定檔或其中的區段,附 PBKDF2 金鑰派生。
+1. **憑證保護** —— 把憑證加密,讓 API Key 這類東西不以明文落地:Windows 上用 DPAPI,其他平台用 AES-256-GCM 的金鑰式保護器(主金鑰來自環境變數或權限受檢的金鑰檔),兩者藏在同一個介面後面,隨時可以換掉。
+2. **敏感字串遮罩** —— 寫進日誌前把憑證遮掉,支援純字串、URL query 參數、JSON 欄位、呼叫端根本沒機會交出值的自由文字,以及一個把整個程序每一行日誌都遮過的 `ILogger` 包裝。
+3. **設定檔加密** —— 用 AES-GCM 加密整份設定檔或其中的區段,附 PBKDF2 金鑰派生;`IConfiguration` 裡加密過的值讀取時自動解開。
+4. **ASP.NET Core 掛法** —— `DecryptProtectedValues`、`AddOzakboySecurity`、`AddOzakboySecretMasking`,`Program.cs` 裡三行。
 
 English documentation: [README.md](README.md)
 
 ## 設計取捨
 
-- **零第三方相依。** 全部建立在 BCL 之上。唯一的套件參照 `System.Security.Cryptography.ProtectedData` 由 Microsoft 官方發佈,是 .NET 取用 DPAPI 的唯一途徑。
+- **零第三方相依。** 全部建立在 BCL 與 Microsoft 官方套件之上:`System.Security.Cryptography.ProtectedData`(.NET 取用 DPAPI 的唯一途徑),以及設定、DI、日誌、Options 的 `Microsoft.Extensions.*` 抽象層。遞移相依圖裡沒有任何一項來自別處。
 - **失敗原因是判斷出來的,不是用猜的。** 兩種封裝格式都帶魔術字標頭與版本位元組,所以「資料損毀」「格式版本不認得」「保護範圍不符」都能在真正解密之前就分辨出來;剩下分不出來的才回報 `DecryptionFailed`。
 - **預期內的失敗不拋例外。** 設定檔從別台機器複製過來、被手動編輯、金鑰輪替過,都是正常會發生的事。每條還原路徑都有對應的 `Try…` 版本,失敗只回傳 `false`。
 - **不內建預設金鑰,也沒有寫死的鹽值。** 金鑰從哪裡來,由呼叫端決定。
@@ -94,7 +95,7 @@ catch (SecretProtectionException)
 ```
 
 DPAPI 是 Windows 專屬機制。在其他平台上 `IsSupported` 會是 `false`,加解密呼叫會拋出訊息明確的 `PlatformNotSupportedException`。
-`ISecretProtector` 存在的理由正是如此:換一個實作注入進去(環境變數、作業系統金鑰鏈、雲端 KMS),其他程式碼一行都不用改。
+`ISecretProtector` 存在的理由正是如此 —— 而 Linux 主機與容器要用的另一個實作,本套件自己就有:見[在 Linux 上用](#四在-linux-與容器上用)。
 
 ## 二、敏感字串遮罩
 
@@ -281,12 +282,181 @@ nonce 是 96 bits 的隨機值,依生日界限,同一把金鑰的加密次數建
 `ConfigurationProtector.IsProtectedValue(value)` 不需要金鑰就能判斷設定值是已加密還是還沒加密,遷移既有設定檔時很好用。
 `ConfigurationProtector.IsSupported` 則回報目前平台有沒有 AES-GCM,請在啟動時檢查,不要等到第一次寫設定檔才發現。
 
+## 四、在 Linux 與容器上用
+
+Windows 以外沒有 DPAPI。`KeyedSecretProtector` 是跨平台的 `ISecretProtector`:AES-256-GCM,主金鑰由應用程式自己持有,
+透過 `ISecretKeySource` 提供。內建兩種來源,對應兩種部署形態。
+
+**容器(Docker / ECS / Kubernetes):金鑰放環境變數**,由編排系統的 secret 機制注入,不落在映像檔也不落在設定檔。
+
+```bash
+openssl rand -base64 32        # 產生一次,以 APP_MASTER_KEY 存進 secret 管理員
+```
+
+```csharp
+using Ozakboy.Security.Protection;
+
+ISecretProtector protector = new KeyedSecretProtector(new EnvironmentVariableKeySource("APP_MASTER_KEY"));
+
+string stored = protector.Protect("line-channel-secret");      // Base64,OZCF 封裝
+if (protector.TryUnprotect(stored, out string? channelSecret))
+{
+    // …
+}
+```
+
+**EC2 / VM:金鑰放檔案**,而且只有執行服務的帳號讀得到。
+
+```bash
+sudo install -m 600 -o myapp -g myapp /dev/null /etc/myapp/master.key
+sudo sh -c 'head -c 32 /dev/urandom > /etc/myapp/master.key'   # 32 個原始位元組;Base64 文字(openssl rand -base64 32)也可以
+```
+
+```csharp
+ISecretProtector protector = new KeyedSecretProtector(new KeyFileKeySource("/etc/myapp/master.key"));
+```
+
+金鑰檔來源**每次讀取**都會檢查,不是只在啟動時:
+
+- 檔案必須存在,內容恰好 32 位元組(原始金鑰),或解碼後是 32 位元組的 Base64 文字。長度 32 位元組但全是 Base64 字元的檔案會被當成 Base64 文字讀 ——
+  24 位元組金鑰的 Base64 恰好也是 32 個字元,少了這條規則它會被當成一把弱金鑰照收。
+- Unix 上,**檔案對群組或其他人開放任何權限位元(`r`、`w`、`x`)就拒絕讀取**,訊息附實際權限與 `chmod 600`。
+  程序跑起來之後檔案被 `chmod` 鬆掉,下一次用到金鑰就會發現。這條檢查關不掉:能關掉的安全檢查最終都會被關掉。
+- Windows 上不檢查權限。NTFS 的 ACL 與 Unix 的權限位元不是同一套模型,本套件不假裝能翻譯;Windows 上 DPAPI 才是原生的答案。
+  這個來源在 Windows 上仍可運作(例如開發機),只是少了權限這道防線。
+
+關於 `KeyedSecretProtector` 值得知道的幾件事:
+
+- **輸出就是 `ConfigurationProtector` 的 `OZCF` 封裝**,沒有第三種格式。同一把金鑰下,在建置機用
+  `ConfigurationProtector.Encrypt(value, key)` 加密的值,部署後保護器解得開,反過來也一樣。一個把值加密的一次性小工具長這樣:
+
+  ```csharp
+  using System.Security.Cryptography;
+  using Ozakboy.Security.Configuration;
+  using Ozakboy.Security.Protection;
+
+  byte[] key = new KeyFileKeySource("/etc/myapp/master.key").ReadKey();   // 或 EnvironmentVariableKeySource
+  try
+  {
+      Console.WriteLine(ConfigurationProtector.Encrypt(args[0], key));  // 輸出貼進 appsettings.json
+  }
+  finally
+  {
+      CryptographicOperations.ZeroMemory(key);
+  }
+  ```
+
+- **金鑰從不常駐。** 每次加解密都向來源要一份新的、用完立刻清零;保護器本身不持有金鑰、不需要 `Dispose`,記憶體傾印裡也不會有一份長期存在的金鑰。
+  代價是每次操作讀一次來源(金鑰檔的話是一次檔案讀取加權限檢查)。憑證保護不是熱路徑,而下面的設定整合每個值只解一次。
+- **`KeyUnavailable` 把「部署沒配好」與「資料有問題」分開。** 變數未設定、檔案不存在、長度不對、權限太開,都是
+  `Reason == SecretProtectionFailureReason.KeyUnavailable` 的 `SecretProtectionException`;訊息指出變數名或路徑,不會有內容。
+  `TryUnprotect` 遇到它跟其他失敗一樣回 `false`。
+- **Windows 上也能用。** 它不是「只給 Linux 的」:多台 Windows 機器要共用同一把金鑰 —— DPAPI 綁機器或使用者,做不到這件事 —— 就用這個。
+- **自己的金鑰來源**(雲端 KMS、作業系統金鑰鏈)只要實作一個介面:`ISecretKeySource` 有給錯誤訊息用的 `Description`,
+  與 `ReadKey()` —— 每次呼叫都必須回傳新配置的 32 位元組陣列,因為呼叫端會把它清零。
+
+## 五、ASP.NET Core 整合
+
+`Program.cs` 裡三行,彼此獨立:
+
+```csharp
+using Ozakboy.Security;
+using Ozakboy.Security.Configuration;
+using Ozakboy.Security.Logging;
+using Ozakboy.Security.Protection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. appsettings.json、環境變數、User Secrets 裡加密過的值,讀取時自動解開。
+//    所有設定來源都加完之後再呼叫 —— 之後才加的來源不會被涵蓋。
+var protector = new KeyedSecretProtector(new KeyFileKeySource("/etc/myapp/master.key"));
+builder.Configuration.DecryptProtectedValues(protector);
+
+// 2. 把 SecretMasker 與 ISecretProtector 放進容器。保護器由你明確選,套件不猜。
+builder.Services.AddOzakboySecurity(security => security
+    .UseProtector(_ => protector)
+    .RegisterKnownSecret(builder.Configuration["Line:ChannelSecret"]!)
+    .RegisterKnownSecret(builder.Configuration.GetConnectionString("Default")!));
+
+// 3. 所有 ILogger<T> 的訊息、結構化屬性、例外文字,先遮罩再交給任何提供者。
+builder.Logging.AddOzakboySecretMasking();
+```
+
+```json
+{
+  "Line": {
+    "ChannelId": "1234567890",
+    "ChannelSecret": "T1pDRgE…"
+  }
+}
+```
+
+上面的 `ChannelSecret` 是 `ConfigurationProtector.Encrypt`(或 `KeyedSecretProtector.Protect`)印出來的東西;`ChannelId` 是明文就維持明文。
+你的 options 類別與 `IOptions<T>` 綁定完全感覺不到差別。
+
+### 設定值解密
+
+- 沒加密的值原樣通過,包括空字串與 `null`。哪些值算「受保護」預設由 `ProtectedValueConfigurationBuilderExtensions.IsAnyProtectedValue` 判斷
+  —— `OZCF` 與 `OZDP` 兩種封裝都認 —— 也可以傳自己的述詞。金鑰式保護器遇到 `OZDP` 的值會大聲失敗,而不是把密文放行:
+  密文被當明文用,比啟動失敗糟得多。
+- 解密失敗擲 `SecretProtectionException`,訊息指出**是哪個設定鍵**(`Line:ChannelSecret`),但不含密文也不含明文;
+  `Reason` 沿用保護器回報的原因,`KeyUnavailable` 是「去修部署」、`DecryptionFailed` 是「金鑰不對或值被改過」。
+  失敗發生在第一次讀到那個值的時候,通常就是啟動時綁定 options 的當下。
+- 每個密文只解密一次,以密文為鍵快取,反覆綁定與 `IOptionsSnapshot` 不會再碰金鑰檔。重新載入後值沒變直接命中,變了自然失效。
+- `WebApplicationBuilder.Configuration` 是 `ConfigurationManager`,同時也是 `IConfigurationBuilder`,替換來源會立即重載。重複呼叫不會重複包。
+
+### DI 註冊
+
+- `SecretMasker` 註冊為單例(`TryAddSingleton`,你自己註冊過的會保留),依 `SecretMaskingOptions` 建立:
+  `MaskOptions`、`KnownSecrets`、`AlsoRegisterOnDefaultMasker`、`MaskLogPropertiesByName`。因為走 Options 模式,設定綁定之後還能補登記:
+
+  ```csharp
+  builder.Services.Configure<SecretMaskingOptions>(options =>
+      options.KnownSecrets.Add(builder.Configuration["Binance:ApiSecret"]!));
+  ```
+
+  每個已知祕密在遮罩器第一次被解析時驗證(非空白、至少 8 個字元);驗證訊息只指出第幾項,不回述值。
+  builder 上的 `RegisterKnownSecret(...)` 則當場檢查。
+- `AlsoRegisterOnDefaultMasker`(預設 `true`)把已知祕密同步登記到 `SecretMasker.Default`,因為 `Ozakboy.Http` 有些關口在沒拿到具名遮罩器時會退回它。
+  多登記一份不花什麼,少登記一份就是外洩。共用的靜態遮罩器不能動時(例如測試隔離)再關掉。
+- 保護器是選項:`UseDpapiProtector(options?)`、`UseKeyedProtector(keySource)`、`UseKeyFromEnvironmentVariable(name)`、
+  `UseKeyFromFile(path)` 或 `UseProtector(factory)`。沒選就沒有 `ISecretProtector` 註冊。唯一會看作業系統的是
+  `UseDpapiOnWindowsOtherwiseKeyed(keySource)`,給在 Windows 開發機與 Linux 主機之間來回的程式碼用;它把「猜」寫在名字上,而且在解析保護器的當下才判斷。
+
+### 日誌遮罩
+
+`AddOzakboySecretMasking()` 把容器裡的 `ILoggerFactory` 換成 `MaskingLoggerFactory`,它建出的每個記錄器都被 `MaskingLogger` 包住。
+因為包的是工廠而不是逐個提供者,`ILogger<T>` 與之後才加的提供者(`AddConsole()`、`AddProvider(...)`)一樣被涵蓋,順序無所謂。
+遮罩器取自 `AddOzakboySecurity`(沒有就退回 `SecretMasker.Default`);`AddOzakboySecretMasking(masker, maskPropertiesByName)` 可以明確指定。
+兩個型別都是公開的,也可以手動包單一個 `ILogger` 或 `ILoggerFactory`。
+
+遮的東西有三層:
+
+1. **格式化後的訊息**,過 `MaskText` —— 每個已登記的祕密不管出現在哪裡都被換掉。
+2. **結構化狀態裡的字串屬性**(`logger.LogError("下單失敗 key={Key}", apiKey)`):已登記的祕密整個換掉;沒登記的值**依屬性名稱**遮,
+   規則與 `MaskNamedValue` 相同 —— `{Token}`、`{Password}`、`{ApiKey}` 就算沒人登記過那個值也會被遮,格式化訊息裡對應的文字也一併改寫。
+   包含式比對也適用,所以 `{CacheKey}` 一樣會被遮;`MaskLogPropertiesByName = false` 可以把這層縮到只剩已登記的祕密。
+3. **例外文字。** 例外的訊息、堆疊或 `ToString()` 裡含有祕密時,提供者收到的是 `MaskedException` 替身:遮罩後的訊息、堆疊與全文,
+   原型別名稱放在 `OriginalTypeName`,內層例外遞迴處理。沒有祕密的例外原封不動傳下去。
+
+**不**遮的東西 —— 依賴它之前先讀這段:
+
+- 只有**字串**屬性會逐個遮。物件、`Uri`、數字原樣通過,接收端若把物件 `ToString()` 進結構化欄位,那條路徑不在包裝的視線內。
+  格式化訊息一定過 `MaskText`,結構化欄位裡的物件不會。
+- 依名稱遮到、但短於 3 個字元的值只改屬性、不在訊息裡替換,因為把一行裡每個 `a` 都換掉會把整行改爛。
+- `Exception.Data` 與例外的自訂屬性不遮;接收端以例外型別分派時看到的是 `MaskedException`,不是原型別。
+- 自己解析 `ILoggerProvider` 建記錄器的程式碼,以及不經 `Microsoft.Extensions.Logging` 的日誌函式庫,不在涵蓋範圍。
+
+效能:層級沒開的話在格式化之前就返回。開著時訊息只格式化一次;沒有東西需要遮 —— 最常見的情況 —— 原本的狀態、例外與格式化委派原封不動往下傳,
+不配置任何東西。有改到才配置一個狀態物件(加一份屬性陣列)。
+
 ## 封裝格式
 
 | | 魔術字 | 版面 |
 | --- | --- | --- |
 | `DpapiSecretProtector` | `OZDP` | 魔術字(4)+ 版本(1)+ 保護範圍(1)+ DPAPI 密文 |
 | `ConfigurationProtector` | `OZCF` | 魔術字(4)+ 版本(1)+ nonce(12)+ 驗證標籤(16)+ 密文 |
+| `KeyedSecretProtector` | `OZCF` | 與 `ConfigurationProtector` 完全相同的封裝 —— 同一把金鑰下兩者互通 |
 
 兩者的字串形式都是 Base64。`OZCF` 的標頭同時作為 AES-GCM 的關聯資料,把標頭與密文綁在同一個驗證標籤底下。
 
@@ -304,11 +474,16 @@ nonce 是 96 bits 的隨機值,依生日界限,同一把金鑰的加密次數建
 | `ScopeMismatch` | 以 `LocalMachine` 加密卻用 `CurrentUser` 還原,或反過來。 |
 | `DecryptionFailed` | 資料遭竄改、金鑰錯誤,或由其他使用者帳戶/其他機器加密。 |
 | `PlatformNotSupported` | 目前平台不支援。內建的 DPAPI 實作遇到這個情況是拋 `PlatformNotSupportedException`,這個值保留給寧可回報原因、也不拋平台例外的替代實作。 |
+| `KeyUnavailable` | `KeyedSecretProtector` 取不到主金鑰:變數未設定、金鑰檔不存在、長度不對,或權限對群組/其他人開放。資料沒問題,是這台主機沒配好。 |
 
-## 執行需求
+## 執行需求與限制
 
-- .NET 10
-- DPAPI 部分需要 Windows;遮罩、AES-GCM 與 PBKDF2 跨平台都能用。
+- .NET 10。
+- 只有 `DpapiSecretProtector` 需要 Windows。其餘全部 —— `KeyedSecretProtector`、遮罩、`ILogger` 包裝、`ConfigurationProtector`、PBKDF2 與
+  ASP.NET Core 整合 —— 在 Linux、macOS、Windows 上都一樣能用。AES-GCM 需要平台的密碼學提供者支援,
+  `ConfigurationProtector.IsSupported`(等同 `KeyedSecretProtector.IsSupported`)會回報,主流的 .NET 10 平台都有。
+- 金鑰檔的權限檢查只針對 Unix 權限位元;Windows 上金鑰檔不經檢查直接讀。
+- 日誌遮罩包裝遮的是字串屬性、格式化訊息與例外文字;它碰不到的部分見[日誌遮罩](#日誌遮罩)。
 
 ## 授權
 
