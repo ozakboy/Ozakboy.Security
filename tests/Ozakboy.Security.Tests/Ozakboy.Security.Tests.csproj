@@ -37,6 +37,16 @@
     <PackageReference Include="MSTest.TestFramework" Version="4.0.2" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.1.0" />
     <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.0.2" />
+    <!--
+      整合測試用的具體實作(InMemory 設定來源、ConfigurationManager、ServiceCollection、LoggerFactory),
+      三個都是 Microsoft 官方套件,遞移相依沒有第三方;主函式庫只引用它們的 Abstractions。
+      Concrete implementations for the integration tests (in-memory configuration source, ConfigurationManager,
+      ServiceCollection, LoggerFactory). All three are official Microsoft packages with no third-party transitive
+      dependency; the library itself references only their Abstractions.
+    -->
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>

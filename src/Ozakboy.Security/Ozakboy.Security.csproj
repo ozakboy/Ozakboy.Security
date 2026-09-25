@@ -33,6 +33,22 @@
   <ItemGroup>
     <!-- DPAPI 在 .NET 上必須透過此官方套件取得(Microsoft 發佈,零第三方遞移相依) -->
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+    <!--
+      0.2.0 起的 ASP.NET Core 整合面:設定值自動解密、DI 註冊、日誌遮罩。
+      四個都是 Microsoft.Extensions.* 的抽象層或 Options,遞移相依只有 Microsoft.Extensions.Primitives,
+      沒有第三方套件;刻意不引用 Microsoft.Extensions.Logging / .Configuration 本體,
+      日誌整合是以 ActivatorUtilities 包住既有的 ILoggerFactory 註冊,不需要認得 LoggerFactory 型別。
+      The ASP.NET Core integration surface added in 0.2.0: configuration decryption, DI registration and
+      log masking. All four are Microsoft.Extensions.* abstractions or Options, whose only transitive
+      dependency is Microsoft.Extensions.Primitives; no third-party package. The non-abstract
+      Microsoft.Extensions.Logging / .Configuration packages are deliberately not referenced: the logging
+      integration decorates whatever ILoggerFactory is registered via ActivatorUtilities and never needs
+      the concrete LoggerFactory type.
+    -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.12" />
   </ItemGroup>
 
 </Project>

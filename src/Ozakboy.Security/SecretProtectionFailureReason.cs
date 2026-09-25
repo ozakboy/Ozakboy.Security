@@ -51,4 +51,14 @@ public enum SecretProtectionFailureReason
     /// implementations that would rather report a failure reason than throw.
     /// </summary>
     PlatformNotSupported = 5,
+
+    /// <summary>
+    /// 取不到主金鑰:環境變數未設定、金鑰檔不存在、長度不對,或金鑰檔的權限對群組/其他人開放而被拒絕。
+    /// 這是金鑰式保護器(<c>KeyedSecretProtector</c>)特有的失敗;資料本身沒有問題,是這台機器沒有正確配置金鑰。
+    /// The master key could not be obtained: the environment variable is unset, the key file is missing
+    /// or the wrong length, or the key file's permissions are open to group or others and it was refused.
+    /// Specific to the keyed protector (<c>KeyedSecretProtector</c>): the payload is fine, this host simply
+    /// has no correctly provisioned key.
+    /// </summary>
+    KeyUnavailable = 6,
 }
