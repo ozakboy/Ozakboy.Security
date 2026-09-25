@@ -139,7 +139,7 @@ public sealed class EnvironmentVariableKeySourceTests
         Environment.SetEnvironmentVariable(name, Convert.ToBase64String(CreateTestKey()));
         try
         {
-            ISecretProtector protector = new KeyedSecretProtector(new EnvironmentVariableKeySource(name));
+            var protector = new KeyedSecretProtector(new EnvironmentVariableKeySource(name));
 
             Assert.AreEqual("api-secret", protector.Unprotect(protector.Protect("api-secret")));
         }

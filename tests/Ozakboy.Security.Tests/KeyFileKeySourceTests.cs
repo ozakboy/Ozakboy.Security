@@ -174,7 +174,10 @@ public sealed class KeyFileKeySourceTests
         var source = new KeyFileKeySource(path);
         _ = source.ReadKey();
 
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+        }
 
         var exception = Assert.ThrowsExactly<SecretProtectionException>(() => source.ReadKey());
         Assert.AreEqual(SecretProtectionFailureReason.KeyUnavailable, exception.Reason);
@@ -200,7 +203,7 @@ public sealed class KeyFileKeySourceTests
     public void EndToEnd_ProtectorOverKeyFile_RoundTrips()
     {
         string path = WriteKeyFile(CreateTestKey());
-        ISecretProtector protector = new KeyedSecretProtector(new KeyFileKeySource(path));
+        var protector = new KeyedSecretProtector(new KeyFileKeySource(path));
 
         string stored = protector.Protect("db-password-value");
 
